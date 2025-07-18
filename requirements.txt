@@ -1,0 +1,25 @@
+# Core dependencies for context-store
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+
+# Database clients
+qdrant-client>=1.7.0
+neo4j>=5.15.0
+redis>=5.0.0
+
+# AI/ML dependencies
+openai>=1.6.0
+tiktoken>=0.5.0
+
+# Data processing
+pyyaml>=6.0
+jsonschema>=4.20.0
+
+# Web/HTTP
+python-multipart>=0.0.6
+httpx>=0.25.0
+
+# Utilities
+python-dotenv>=1.0.0
+loguru>=0.7.0
