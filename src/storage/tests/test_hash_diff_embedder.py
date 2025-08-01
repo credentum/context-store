@@ -15,7 +15,7 @@ from unittest.mock import Mock, mock_open, patch
 import pytest
 import yaml
 
-from src.storage.hash_diff_embedder import DocumentHash, HashDiffEmbedder
+from src.storage.hash_diff_embedder import DocumentHash, EmbeddingTask, HashDiffEmbedder
 
 
 class TestHashDiffEmbedder:
@@ -211,7 +211,7 @@ class TestHashDiffEmbedder:
         assert "doc1" in saved_data
         assert saved_data["doc1"]["document_id"] == "doc1"
 
-    @patch("src.storage.hash_diff_embedder.openai.OpenAI")
+    @patch("src.storage.hash_diff_embedder.OpenAI")
     @patch("src.storage.hash_diff_embedder.QdrantClient")
     def test_connect_success(
         self,
@@ -456,7 +456,7 @@ class TestErrorHandling:
 class TestEmbeddingErrorScenarios:
     """Test error scenarios in embedding operations"""
 
-    @patch("src.storage.hash_diff_embedder.openai.OpenAI")
+    @patch("src.storage.hash_diff_embedder.OpenAI")
     def test_openai_rate_limit_handling(self, mock_openai_class: Mock) -> None:
         """Test handling of OpenAI rate limit errors"""
         import openai

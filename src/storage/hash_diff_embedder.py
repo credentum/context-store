@@ -25,8 +25,20 @@ from qdrant_client.models import PointStruct
 
 
 @dataclass
+class DocumentHash:
+    """Track document hashes and metadata"""
+
+    document_id: str
+    file_path: str
+    content_hash: str
+    embedding_hash: str
+    last_embedded: str
+    vector_id: str
+
+
+@dataclass
 class EmbeddingTask:
-    """Task for async embedding"""
+    """Task for embedding"""
 
     file_path: Path
     document_id: str
@@ -63,7 +75,17 @@ class HashDiffEmbedder:
         self.request_timeout = embed_config.get("request_timeout", 30)
 
         # Rate limiting
-        self.semaphore = asyncio.Semaphore(10)  # Max concurrent API calls
+        # Rate limiting handled differently in sync version
+
+    def _compute_content_hash(self, content: str) -> str:
+        """Compute SHA-256 hash of content"""
+        return hashlib.sha256(content.encode()).hexdigest()
+
+    def _compute_embedding_hash(self, embedding: List[float]) -> str:
+        """Compute hash of embedding vector"""
+        # Convert to bytes and hash
+        embedding_bytes = json.dumps(embedding, sort_keys=True).encode()
+        return hashlib.sha256(embedding_bytes).hexdigest()
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load configuration"""
@@ -97,7 +119,7 @@ class HashDiffEmbedder:
     def connect(self) -> bool:
         """Connect to services asynchronously"""
         # Connect to Qdrant
-        from src.core.utils import get_secure_connection_config
+        from ..core.utils import get_secure_connection_config
 
         qdrant_config = get_secure_connection_config(self.config, "qdrant")
 
@@ -133,13 +155,13 @@ class HashDiffEmbedder:
 
         for attempt in range(self.max_retries):
             try:
-                async with self.semaphore:  # Rate limiting
-                    if self.openai_client is None:
-                        raise Exception("OpenAI client not initialized")
-                    response = self.openai_client.embeddings.create(
-                        model=self.embedding_model, input=text, timeout=self.request_timeout
-                    )
-                    return list(response.data[0].embedding)
+                # Rate limiting removed - sync version doesn't use semaphore
+                if self.openai_client is None:
+                    raise Exception("OpenAI client not initialized")
+                response = self.openai_client.embeddings.create(
+                    model=self.embedding_model, input=text, timeout=self.request_timeout
+                )
+                return list(response.data[0].embedding)
 
             except Exception as e:
                 if "rate_limit" in str(e).lower() and attempt < self.max_retries - 1:
@@ -224,8 +246,8 @@ class HashDiffEmbedder:
                 continue
 
             try:
-                async with aiofiles.open(yaml_file, "r") as f:
-                    content = await f.read()
+                with open(yaml_file, "r") as f:
+                    content = f.read()
                     data = yaml.safe_load(content)
 
                 if not data:
@@ -279,8 +301,8 @@ class HashDiffEmbedder:
 
         # Save cache
         self.hash_cache_path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(self.hash_cache_path, "w") as f:
-            await f.write(json.dumps(self.hash_cache, indent=2))
+        with open(self.hash_cache_path, "w") as f:
+            f.write(json.dumps(self.hash_cache, indent=2))
 
         return embedded_count, total_count
 
@@ -303,13 +325,13 @@ async def main():
         config_path=args.config, perf_config_path=args.perf_config, verbose=args.verbose
     )
 
-    if not await embedder.connect():
+    if not embedder.connect():
         return
 
     click.echo("=== Async Hash-Diff Embedder ===\n")
 
     start_time = time.time()
-    embedded, total = await embedder.embed_directory(args.path)
+    embedded, total = embedder.embed_directory(args.path)
     elapsed = time.time() - start_time
 
     click.echo("\nResults:")

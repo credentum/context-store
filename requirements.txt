@@ -23,3 +23,7 @@ httpx>=0.25.0
 # Utilities
 python-dotenv>=1.0.0
 loguru>=0.7.0
+click>=8.1.0
+
+# Analytics
+duckdb>=0.9.0

@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import yaml
 
-from src.storage.hash_diff_embedder_async import AsyncHashDiffEmbedder, EmbeddingTask
+from src.storage.hash_diff_embedder import HashDiffEmbedder, EmbeddingTask
 
 
 @pytest.fixture
