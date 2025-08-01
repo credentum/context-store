@@ -1,0 +1,14 @@
+---
+# Schema for log documents (includes MCP contracts, execution logs, etc.)
+# Uses include directive for base fields
+
+base: include('base', required=True)
+
+# Log-specific fields - very flexible schema
+log_type: enum('execution', 'analysis', 'contract', 'trace', 'debug',
+  'performance', 'other', required=False)
+source: str(required=False)
+data: any(required=False)
+
+# Allow completely flexible additional content
+any(str(), required=False): any(required=False)

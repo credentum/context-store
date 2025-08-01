@@ -1,0 +1,45 @@
+---
+# Schema for sprint documents
+schema_version: regex('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+document_type: str(equals='sprint')
+id: str()
+title: str()
+status: enum('planning', 'active', 'completed', 'cancelled')
+created_date: str()
+last_modified: str()
+last_referenced: str(required=False)
+expires: str(required=False)
+sprint_number: int()
+start_date: str()
+end_date: str()
+goals: list(str(), required=False)
+phases: list(include('phase'), required=False)
+success_metrics: list(include('metric'), required=False)
+team: list(include('team_member'), required=False)
+graph_metadata: include('graph_metadata', required=False)
+
+---
+# Sub-schema definitions
+phase:
+  phase: int()
+  name: str()
+  duration_days: int()
+  status: enum('pending', 'in_progress', 'completed')
+  tasks: list(str(), required=False)
+
+metric:
+  metric: str()
+  target: num()
+  unit: str()
+
+team_member:
+  agent: str()
+  role: str()
+
+graph_metadata:
+  relationships: list(include('relationship'), required=False)
+
+relationship:
+  type: str()
+  target: str()
+  description: str(required=False)
