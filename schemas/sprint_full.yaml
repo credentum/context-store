@@ -1,0 +1,82 @@
+---
+# Full schema for sprint documents
+
+# Base fields
+schema_version: regex('^[0-9]+\\.[0-9]+\\.[0-9]+$', required=True)
+document_type: enum('sprint', required=True)
+id: regex('^[a-zA-Z0-9-]+$', required=True)
+title: str(min=1, max=200, required=True)
+status: enum('active', 'archived', 'deprecated', 'draft', 'planning',
+  'in_progress', 'completed', required=True)
+created_date: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+last_modified: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+last_referenced: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+expires: regex('^\\d{4}-\\d{2}-\\d{2}$', required=False)
+authors: list(str(), required=False)
+tags: list(str(), required=False)
+
+# Sprint-specific fields
+sprint_number: int(min=1, required=True)
+start_date: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+end_date: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+goals: list(str(), min=1, required=True)
+phases: list(include('phase'), required=False)
+team: list(include('team_member'), required=False)
+success_metrics: list(include('metric'), required=False)
+
+# Optional configuration for sprint automation
+config: include('sprint_config', required=False)
+
+# Optional graph metadata
+graph_metadata: include('graph_metadata', required=False)
+
+---
+# Sub-schema definitions
+phase:
+  phase: int(min=0, required=True)
+  name: str(required=True)
+  status: enum('pending', 'in_progress', 'completed', 'blocked', required=True)
+  # Optional fields that sprint_issue_linker.py supports
+  duration_days: int(min=1, required=False)
+  priority: enum('high', 'medium', 'low', 'blocking', required=False)
+  component: str(required=False)
+  description: str(required=False)
+  # Tasks can be either simple strings OR detailed objects
+  tasks: list(any(str(), include('task_object')), required=False)
+
+task_object:
+  title: str(required=True)
+  description: str(required=False)
+  labels: list(str(), required=False)
+  dependencies: list(str(), required=False)
+  github_issue: int(required=False)
+  estimate: str(required=False)
+  assignee: str(required=False)
+
+team_member:
+  role: str(required=True)
+  agent: str(required=True)
+  # Optional field that the template uses
+  responsibilities: list(str(), required=False)
+
+metric:
+  metric: str(required=True)
+  target: num(required=True)
+  unit: str(required=True)
+  # Optional field that the template uses
+  description: str(required=False)
+
+sprint_config:
+  auto_create_issues: bool(required=False)
+  issue_template: str(required=False)
+  default_labels: list(str(), required=False)
+  milestone: str(required=False)
+  project_board: str(required=False)
+
+graph_metadata:
+  node_type: str(required=True)
+  relationships: list(include('relationship'), required=False)
+
+relationship:
+  type: str(required=True)
+  target: str(required=True)

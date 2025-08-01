@@ -1,0 +1,42 @@
+---
+# Full schema for trace documents (expanded from trace.yaml + base.yaml)
+# Used when include directive isn't supported
+
+# Base fields from base.yaml
+schema_version: regex('^[0-9]+\\.[0-9]+\\.[0-9]+$', required=True)
+document_type: enum('design', 'decision', 'sprint', 'trace', 'log',
+  required=True)
+id: regex('^[a-zA-Z0-9-]+$', required=True)
+title: str(min=1, max=200, required=True)
+status: enum('active', 'archived', 'deprecated', 'draft', 'planning',
+  'in_progress', 'completed', required=True)
+created_date: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+last_modified: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+last_referenced: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+expires: regex('^\\d{4}-\\d{2}-\\d{2}$', required=False)
+authors: list(str(), required=False)
+tags: list(str(), required=False)
+
+# Optional graph metadata
+graph_metadata: include('graph_metadata', required=False)
+
+# Trace-specific fields - flexible schema for various trace
+# documents
+description: str(required=False)
+content_type: enum('log', 'analysis', 'contract', 'report', 'other',
+  required=False)
+source: str(required=False)
+data: any(required=False)
+
+# Allow any additional fields for flexibility (MCP contracts, logs, etc.)
+any(str(), required=False): any(required=False)
+
+---
+# Sub-schema definitions
+graph_metadata:
+  node_type: str(required=True)
+  relationships: list(include('relationship'), required=False)
+
+relationship:
+  type: str(required=True)
+  target: str(required=True)

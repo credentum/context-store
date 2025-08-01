@@ -1,0 +1,38 @@
+---
+# Full schema for log documents (expanded from log.yaml + base.yaml)
+# Used when include directive isn't supported
+
+# Base fields from base.yaml
+schema_version: regex('^[0-9]+\\.[0-9]+\\.[0-9]+$', required=True)
+document_type: enum('design', 'decision', 'sprint', 'trace', 'log',
+  required=True)
+id: regex('^[a-zA-Z0-9-]+$', required=True)
+title: str(min=1, max=200, required=True)
+status: enum('active', 'archived', 'deprecated', 'draft', 'planning',
+  'in_progress', 'completed', required=True)
+created_date: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+last_modified: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+last_referenced: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+expires: regex('^\\d{4}-\\d{2}-\\d{2}$', required=False)
+authors: list(str(), required=False)
+tags: list(str(), required=False)
+
+# Optional graph metadata
+graph_metadata: include('graph_metadata', required=False)
+
+# Log-specific fields - very flexible for MCP contracts and other log
+# data
+log_type: enum('execution', 'analysis', 'contract', 'trace', 'debug',
+  'performance', 'other', required=False)
+source: str(required=False)
+data: any(required=False)
+
+---
+# Sub-schema definitions
+graph_metadata:
+  node_type: str(required=True)
+  relationships: list(include('relationship'), required=False)
+
+relationship:
+  type: str(required=True)
+  target: str(required=True)

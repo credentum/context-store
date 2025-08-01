@@ -1,0 +1,38 @@
+---
+# Full schema for decision documents
+
+# Base fields
+schema_version: regex('^[0-9]+\\.[0-9]+\\.[0-9]+$', required=True)
+document_type: enum('decision', required=True)
+id: regex('^[a-zA-Z0-9-]+$', required=True)
+title: str(min=1, max=200, required=True)
+status: enum('active', 'archived', 'deprecated', 'draft', required=True)
+created_date: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+last_modified: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+last_referenced: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+expires: regex('^\\d{4}-\\d{2}-\\d{2}$', required=False)
+authors: list(str(), required=False)
+tags: list(str(), required=False)
+
+# Decision-specific fields
+decision: str(min=1, required=True)
+decision_date: regex('^\\d{4}-\\d{2}-\\d{2}$', required=True)
+alternatives_considered: map(include('alternative'), required=False)
+impacts: list(str(), required=False)
+
+# Optional graph metadata
+graph_metadata: include('graph_metadata', required=False)
+
+---
+# Sub-schema definitions
+alternative:
+  name: str(required=True)
+  reason_rejected: str(required=True)
+
+graph_metadata:
+  node_type: str(required=True)
+  relationships: list(include('relationship'), required=False)
+
+relationship:
+  type: str(required=True)
+  target: str(required=True)

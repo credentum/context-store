@@ -1,0 +1,16 @@
+---
+# Schema for trace documents (includes logs, analysis, MCP contracts, etc.)
+# Uses include directive for base fields
+
+base: include('base', required=True)
+
+# Trace-specific fields - flexible schema for various trace documents
+description: str(required=False)
+content_type: enum('log', 'analysis', 'contract', 'report', 'other',
+  required=False)
+source: str(required=False)
+data: any(required=False)
+
+# Allow any additional fields for flexibility (MCP contracts, logs,
+# etc.)
+any(str(), required=False): any(required=False)
