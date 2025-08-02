@@ -34,7 +34,7 @@ jobs:
       pull-requests: write      # allow comment / approval
       issues: write             # allow auto-file follow-up issues
       statuses: write           # allow setting commit status
-      # id-token: write         # Enable only if using Sigstore attestation
+      id-token: write           # Required by claude-code-action for OIDC token
 
     steps:
       - name: Checkout repository
