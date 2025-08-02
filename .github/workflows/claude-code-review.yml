@@ -28,13 +28,13 @@ jobs:
   claude-pr-review:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # Increased for large PRs  # Add timeout to prevent infinite hanging
+    timeout-minutes: 15  # Add timeout to prevent infinite hanging
     permissions:
       contents: read
       pull-requests: write      # allow comment / approval
       issues: write             # allow auto-file follow-up issues
       statuses: write           # allow setting commit status
-      id-token: write           # Required by claude-code-action for OIDC token
+      id-token: write           # for future Sigstore attestation
 
     steps:
       - name: Checkout repository
@@ -46,13 +46,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Install dev requirements if they exist
-          [ -f requirements-dev.txt ] && pip install -r requirements-dev.txt || echo "No requirements-dev.txt found"
-          # Install test requirements if they exist
-          [ -f requirements-test.txt ] && pip install -r requirements-test.txt || echo "No requirements-test.txt found"
+          pip install -r requirements-dev.txt
           pip install pre-commit
           pip install yamale
-          pip install pytest pytest-cov
           npm install -g ajv-cli
 
       - name: Create directories
@@ -72,7 +68,7 @@ jobs:
 
       - name: Run Claude Code Review
         id: claude-review
-        uses: anthropics/claude-code-action@b3eb450bfcaf97e1ee9d4dd68d874efabb56659d  # v0.0.51
+        uses: anthropics/claude-code-action@beta
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           model: "claude-opus-4-20250514"
@@ -175,13 +171,133 @@ jobs:
             # Save raw response for debugging
             echo "$raw_response" > raw_review_output.txt
 
-            # Extract YAML content using external script for security
-            export PR_NUMBER="${{ github.event.pull_request.number }}"
-            export COVERAGE_PCT="${{ env.COVERAGE_PCT }}"
-            export COVERAGE_BASELINE="${{ env.COVERAGE_BASELINE }}"
-            
-            # Run external script with restricted permissions
-            python3 .github/scripts/format_correction.py
+            # Extract YAML content from mixed format response
+            python3 << 'EOF'
+          import re
+          import yaml
+          import sys
+          from datetime import datetime
+
+          # Read the raw response
+          with open('raw_review_output.txt', 'r') as f:
+              content = f.read()
+
+          print("🔧 Processing Claude response for format correction...")
+
+          # Strategy 1: Try to extract YAML block if it exists
+          yaml_match = re.search(r'```yaml\s*\n(.*?)\n```', content, re.DOTALL)
+          if yaml_match:
+              yaml_content = yaml_match.group(1)
+              print("✓ Found YAML block in response")
+          else:
+              # Strategy 2: Extract everything after markdown headers (---\n)
+              if '---\n' in content:
+                  parts = content.split('---\n', 1)
+                  if len(parts) > 1:
+                      yaml_content = parts[1].strip()
+                      print("✓ Extracted YAML after markdown separator")
+                  else:
+                      yaml_content = content
+              else:
+                  yaml_content = content
+
+          # Clean the YAML content
+          yaml_content = yaml_content.strip()
+
+          # Remove any remaining markdown formatting
+          yaml_content = re.sub(r'^\*\*.*?\*\*.*?\n', '', yaml_content, flags=re.MULTILINE)
+          yaml_content = re.sub(r'^---\s*$', '', yaml_content, flags=re.MULTILINE)
+
+          # Try to parse and validate the YAML
+          try:
+              data = yaml.safe_load(yaml_content)
+              if isinstance(data, dict):
+                  print("✓ YAML parsed successfully")
+
+                  # Ensure required fields exist with defaults
+                  if 'schema_version' not in data:
+                      data['schema_version'] = "1.0"
+                  if 'pr_number' not in data:
+                      data['pr_number'] = int("${{ github.event.pull_request.number }}")
+                  if 'timestamp' not in data:
+                      data['timestamp'] = datetime.utcnow().isoformat() + 'Z'
+                  if 'reviewer' not in data:
+                      data['reviewer'] = "ARC-Reviewer"
+                  if 'verdict' not in data:
+                      # Determine verdict based on coverage and blocking issues
+                      has_blockers = (data.get('issues', {}).get('blocking', []) and
+                                     len(data.get('issues', {}).get('blocking', [])) > 0)
+                      coverage_ok = (data.get('coverage', {}).get('current_pct', 0) >=
+                                   float("${{ env.COVERAGE_BASELINE }}"))
+
+                      if has_blockers or not coverage_ok:
+                          data['verdict'] = "REQUEST_CHANGES"
+                      else:
+                          data['verdict'] = "APPROVE"
+                  if 'summary' not in data:
+                      data['summary'] = "Code review completed"
+                  if 'coverage' not in data:
+                      # Use actual coverage if available
+                      actual_coverage = float("${{ env.COVERAGE_PCT }}" or "0")
+                      meets_baseline = actual_coverage >= float("${{ env.COVERAGE_BASELINE }}")
+                      data['coverage'] = {
+                          'current_pct': actual_coverage,
+                          'status': "PASS" if meets_baseline else "FAIL",
+                          'meets_baseline': meets_baseline
+                      }
+                  if 'issues' not in data:
+                      data['issues'] = {
+                          'blocking': [],
+                          'warnings': [],
+                          'nits': []
+                      }
+                  if 'automated_issues' not in data:
+                      data['automated_issues'] = []
+
+                  # Output clean YAML
+                  clean_yaml = yaml.dump(data, default_flow_style=False, sort_keys=False)
+                  with open('corrected_review.yaml', 'w') as f:
+                      f.write(clean_yaml)
+
+                  print("✅ Generated corrected YAML format")
+
+              else:
+                  print("❌ YAML content is not a valid dictionary")
+                  sys.exit(1)
+
+          except yaml.YAMLError as e:
+              print(f"❌ YAML parsing failed: {e}")
+              # Create minimal valid YAML as fallback
+              # Use actual coverage in fallback
+              actual_coverage = float("${{ env.COVERAGE_PCT }}" or "0")
+              meets_baseline = actual_coverage >= float("${{ env.COVERAGE_BASELINE }}")
+
+              fallback_data = {
+                  'schema_version': "1.0",
+                  'pr_number': int("${{ github.event.pull_request.number }}"),
+                  'timestamp': datetime.utcnow().isoformat() + 'Z',
+                  'reviewer': "ARC-Reviewer",
+                  'verdict': "APPROVE" if meets_baseline else "REQUEST_CHANGES",
+                  'summary': "Format correction applied - review completed",
+                  'coverage': {
+                      'current_pct': actual_coverage,
+                      'status': "PASS" if meets_baseline else "FAIL",
+                      'meets_baseline': meets_baseline
+                  },
+                  'issues': {
+                      'blocking': [] if meets_baseline else [{'description': f'Coverage below baseline: {actual_coverage}% < ${{ env.COVERAGE_BASELINE }}%', 'category': 'coverage'}],
+                      'warnings': [{'description': 'Original review format was invalid', 'category': 'format'}],
+                      'nits': []
+                  },
+                  'automated_issues': []
+              }
+
+              with open('corrected_review.yaml', 'w') as f:
+                  yaml.dump(fallback_data, f, default_flow_style=False, sort_keys=False)
+
+              print("✅ Generated fallback YAML format")
+
+          EOF
 
             # Validate the corrected YAML
             if python3 -c "import yaml; yaml.safe_load(open('corrected_review.yaml'))" 2>/dev/null; then
@@ -221,19 +337,20 @@ jobs:
       - name: Load Coverage Configuration
         id: load-config
         run: |
-          # Load baseline and tolerance buffer
+          # Load baseline and tolerance buffer with fallback
           if [ -f .coverage-config.json ]; then
             config=$(python -c "import json; data=json.load(open('.coverage-config.json')); \
                         print(f\"{data['baseline']},{data.get('tolerance_buffer', 0.0)}\")")
             baseline=$(echo "$config" | cut -d',' -f1)
             tolerance=$(echo "$config" | cut -d',' -f2)
-            effective_baseline=$(python -c "print(max(0, $baseline - $tolerance))")
-            echo "COVERAGE_BASELINE=$effective_baseline" >> $GITHUB_ENV
-            echo "Coverage baseline loaded: $baseline% (effective: $effective_baseline% with $tolerance% tolerance)"
           else
-            echo "No .coverage-config.json found, using default baseline of 78.0%"
-            echo "COVERAGE_BASELINE=78.0" >> $GITHUB_ENV
+            echo "No .coverage-config.json found, using defaults"
+            baseline=78.0
+            tolerance=0.0
           fi
+          effective_baseline=$(python -c "print(max(0, $baseline - $tolerance))")
+          echo "COVERAGE_BASELINE=$effective_baseline" >> $GITHUB_ENV
+          echo "Coverage baseline loaded: $baseline% (effective: $effective_baseline% with $tolerance% tolerance)"
 
       # ---------- Extract and Store Coverage Metrics ----------
       - name: Extract Coverage Metrics
@@ -722,20 +839,93 @@ jobs:
             --jq '.[] | select(.body | contains("ARC-AUTOMATION")) | .body' > automation.txt || echo ""
 
           if [ -s automation.txt ]; then
-            # Process automation YAML using external script
-            export PR_NUM="${{ github.event.pull_request.number }}"
-            export PR_URL="${{ github.event.pull_request.html_url }}"
-            export PR_AUTHOR="${{ github.event.pull_request.user.login }}"
-            
-            python3 .github/scripts/process_follow_up_issues.py
-            
-            # Create the issue if the body was generated
-            if [ -f issue_body.md ]; then
-              gh issue create \
-                --title "[PR #${{ github.event.pull_request.number }}] ARC-Reviewer Follow-ups" \
-                --body-file issue_body.md \
-                --label "from-code-review,sprint-current,phase:4.1"
-            fi
+            # Extract and process YAML
+            python3 << 'PYEOF'
+          import re
+          import yaml
+
+          with open('automation.txt', 'r') as f:
+              content = f.read()
+
+          yaml_match = re.search(r'```yaml\s*\n(.*?)\n```', content, re.DOTALL)
+          if yaml_match:
+              try:
+                  data = yaml.safe_load(yaml_match.group(1))
+                  issues = data.get('automated_issues', [])
+
+                  if issues:
+                      print(f"Found {len(issues)} automation issues")
+
+                      # Create aggregated issue
+                      import subprocess
+                      import json
+
+                      # Validate and ensure labels exist
+                      import os
+                      import sys
+
+                      # Add scripts directory to path for validation utility
+                      script_dir = os.path.join(os.environ.get('GITHUB_WORKSPACE', '.'), 'scripts')
+                      if os.path.exists(script_dir):
+                          sys.path.insert(0, script_dir)
+                          try:
+                              from validate_labels import ensure_label_exists
+                              validated_labels = []
+                              for label in ['from-code-review', 'sprint-current', 'phase:4.1']:
+                                  validated_label = ensure_label_exists(label)
+                                  validated_labels.append(validated_label)
+                          except ImportError:
+                              # Fallback if validation script not available
+                              validated_labels = ['from-code-review', 'sprint-current', 'phase:4.1']
+                      else:
+                          # Fallback labels
+                          validated_labels = ['from-code-review', 'sprint-current', 'phase:4.1']
+
+                      # Build issue content
+                      checklist = []
+                      for issue in issues:
+                          title = issue['title']
+                          desc = issue['description']
+                          phase = issue['phase']
+                          checklist.append(f"- [ ] **{title}**: {desc} (phase: {phase})")
+
+                      pr_num = "${{ github.event.pull_request.number }}"
+                      pr_url = "${{ github.event.pull_request.html_url }}"
+                      pr_author = "${{ github.event.pull_request.user.login }}"
+
+                      # Build issue content safely
+                      issue_body = "## Automated Follow-ups from PR #" + pr_num + "\n\n"
+                      issue_body += "Source: " + pr_url + "\n"
+                      issue_body += "Author: @" + pr_author + "\n\n"
+                      issue_body += "## Issues to Triage\n\n"
+                      issue_body += "\n".join(checklist) + "\n\n"
+                      issue_body += "## Instructions\n\n"
+                      issue_body += "For agents/PMs: Review, prioritize, and move high-value items to sprint YAML files.\n\n"
+                      issue_body += "---\n"
+                      issue_body += "Auto-generated by ARC-Reviewer"
+
+                      with open('issue_body.md', 'w') as f:
+                          f.write(issue_body)
+
+                      # Create the issue
+                      result = subprocess.run([
+                          'gh', 'issue', 'create',
+                          '--title', f'[PR #{pr_num}] ARC-Reviewer Follow-ups',
+                          '--body-file', 'issue_body.md',
+                          '--label', ','.join(validated_labels)
+                      ], capture_output=True, text=True)
+
+                      if result.returncode == 0:
+                          print(f"✅ Created aggregated issue: {result.stdout.strip()}")
+                      else:
+                          print(f"❌ Failed to create issue: {result.stderr}")
+                  else:
+                      print("No automation issues found")
+              except Exception as e:
+                  print(f"Error processing automation data: {e}")
+          else:
+              print("No automation comment found")
+          PYEOF
           else
             echo "No automation data found for this PR"
           fi
