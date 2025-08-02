@@ -374,13 +374,18 @@ jobs:
         id: load-config
         run: |
           # Load baseline and tolerance buffer
-          config=$(python -c "import json; data=json.load(open('.coverage-config.json')); \
-                      print(f\"{data['baseline']},{data.get('tolerance_buffer', 0.0)}\")")
-          baseline=$(echo "$config" | cut -d',' -f1)
-          tolerance=$(echo "$config" | cut -d',' -f2)
-          effective_baseline=$(python -c "print(max(0, $baseline - $tolerance))")
-          echo "COVERAGE_BASELINE=$effective_baseline" >> $GITHUB_ENV
-          echo "Coverage baseline loaded: $baseline% (effective: $effective_baseline% with $tolerance% tolerance)"
+          if [ -f .coverage-config.json ]; then
+            config=$(python -c "import json; data=json.load(open('.coverage-config.json')); \
+                        print(f\"{data['baseline']},{data.get('tolerance_buffer', 0.0)}\")")
+            baseline=$(echo "$config" | cut -d',' -f1)
+            tolerance=$(echo "$config" | cut -d',' -f2)
+            effective_baseline=$(python -c "print(max(0, $baseline - $tolerance))")
+            echo "COVERAGE_BASELINE=$effective_baseline" >> $GITHUB_ENV
+            echo "Coverage baseline loaded: $baseline% (effective: $effective_baseline% with $tolerance% tolerance)"
+          else
+            echo "No .coverage-config.json found, using default baseline of 78.0%"
+            echo "COVERAGE_BASELINE=78.0" >> $GITHUB_ENV
+          fi
 
       # ---------- Extract and Store Coverage Metrics ----------
       - name: Extract Coverage Metrics
