@@ -46,10 +46,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -r requirements-test.txt
-          pip install -r requirements-dev.txt
+          # Install dev requirements if they exist
+          [ -f requirements-dev.txt ] && pip install -r requirements-dev.txt || echo "No requirements-dev.txt found"
+          # Install test requirements if they exist
+          [ -f requirements-test.txt ] && pip install -r requirements-test.txt || echo "No requirements-test.txt found"
           pip install pre-commit
           pip install yamale
+          pip install pytest pytest-cov
           npm install -g ajv-cli
 
       - name: Create directories
@@ -75,7 +78,7 @@ jobs:
           model: "claude-opus-4-20250514"
           # -------- ARC-Reviewer Prompt --------
           direct_prompt: |
-            You are ARC-Reviewer, a senior staff engineer reviewing pull-requests on the context-store (MCP-based context platform).
+            You are ARC-Reviewer, a senior staff engineer reviewing pull-requests on the context-store (MCP-based context storage service).
 
             CRITICAL: Output ONLY valid YAML. No markdown, no explanations, no code blocks. Start directly with the YAML schema.
             FORMATTING: Ensure consistent YAML formatting for both initial reviews and subsequent edits.
@@ -92,7 +95,7 @@ jobs:
             Review criteria (any failure = REQUEST_CHANGES):
             - Test Coverage: validators/* ≥ 90%, overall ≥ 78.0%
             - MCP Compatibility: Tool contracts updated, valid JSON schema
-            - Context Integrity: All YAML has schema_version, context/ structure intact
+            - Storage Integrity: All storage implementations have tests
             - Code Quality: Python typed, docstrings, pre-commit passes
             - Security: Dockerfiles pinned digests, no secrets, CVE-free deps
 
@@ -146,9 +149,9 @@ jobs:
           # Tools Claude may invoke during review
           allowed_tools: |
             Bash(pytest --cov=src --cov-report=term --cov-report=json -m "not integration and not e2e"),
-            Bash(pre-commit run --all-files --config .pre-commit-config-ci.yaml),
+            Bash(pre-commit run --all-files --config .pre-commit-config.yaml),
             Bash(python -m src.validators.config_validator),
-            Bash(yamale -s context/schemas/ context/),
+            Bash(yamale -s schemas/ context/),
             Bash(npm run test:mcp-types),
             Bash(ajv validate -s mcp-schema.json -d context/mcp_contracts/*.json),
             Bash(git diff --name-only origin/main...HEAD),
