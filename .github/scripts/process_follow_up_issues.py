@@ -41,10 +41,14 @@ try:
                     
                     checklist.append(f"- [ ] **{title}**: {desc} (phase: {phase})")
                 
-                # Get environment variables safely
-                pr_num = os.environ.get('PR_NUM', '0')
+                # Get environment variables with sanitization
+                pr_num = re.sub(r'[^0-9]', '', os.environ.get('PR_NUM', '0'))[:10]
                 pr_url = os.environ.get('PR_URL', '#')
-                pr_author = os.environ.get('PR_AUTHOR', 'unknown')
+                pr_author = re.sub(r'[^a-zA-Z0-9-_]', '', os.environ.get('PR_AUTHOR', 'unknown'))[:50]
+                
+                # Validate PR URL to prevent injection
+                if pr_url != '#' and not re.match(r'^https://github\.com/[\w-]+/[\w-]+/pull/\d+$', pr_url):
+                    pr_url = '#'  # Default to safe value if invalid
                 
                 # Build issue content safely
                 issue_body = f"""## Automated Follow-ups from PR #{pr_num}

@@ -7,7 +7,16 @@ import re
 import yaml
 import sys
 import os
+import logging
 from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    stream=sys.stderr
+)
+logger = logging.getLogger(__name__)
 
 # Security: Restrict file operations to current directory only
 os.chdir(os.getcwd())
@@ -15,35 +24,42 @@ os.chdir(os.getcwd())
 def safe_int(value, default):
     try:
         return int(value)
-    except:
+    except (TypeError, ValueError) as e:
+        logger.debug(f"Failed to convert to int: {e}")
         return default
 
 def safe_float(value, default):
     try:
         return float(value)
-    except:
+    except (TypeError, ValueError) as e:
+        logger.debug(f"Failed to convert to float: {e}")
         return default
+
+# Get file paths from environment or use defaults
+input_file = os.environ.get('REVIEW_INPUT_FILE', 'raw_review_output.txt')
+output_file = os.environ.get('REVIEW_OUTPUT_FILE', 'corrected_review.yaml')
 
 try:
     # Read the raw response with size limit for security
     max_size = 1024 * 1024  # 1MB limit
-    with open('raw_review_output.txt', 'r') as f:
+    logger.info(f"Reading input from {input_file}")
+    with open(input_file, 'r') as f:
         content = f.read(max_size)
     
-    print("🔧 Processing Claude response for format correction...")
+    logger.info("Processing Claude response for format correction...")
     
     # Strategy 1: Try to extract YAML block if it exists
     yaml_match = re.search(r'```yaml\s*\n(.*?)\n```', content, re.DOTALL)
     if yaml_match:
         yaml_content = yaml_match.group(1)
-        print("✓ Found YAML block in response")
+        logger.info("Found YAML block in response")
     else:
         # Strategy 2: Extract everything after markdown headers (---\n)
         if '---\n' in content:
             parts = content.split('---\n', 1)
             if len(parts) > 1:
                 yaml_content = parts[1].strip()
-                print("✓ Extracted YAML after markdown separator")
+                logger.info("Extracted YAML after markdown separator")
             else:
                 yaml_content = content
         else:
@@ -52,15 +68,45 @@ try:
     # Clean the YAML content
     yaml_content = yaml_content.strip()
     
+    # Validate content size
+    if len(yaml_content) > 500000:  # 500KB limit
+        logger.error("YAML content too large (max 500KB)")
+        raise ValueError("Content size exceeds limit")
+    
     # Remove any remaining markdown formatting
     yaml_content = re.sub(r'^\*\*.*?\*\*.*?\n', '', yaml_content, flags=re.MULTILINE)
     yaml_content = re.sub(r'^---\s*$', '', yaml_content, flags=re.MULTILINE)
+    
+    # Basic structure validation before parsing
+    if not yaml_content or yaml_content.isspace():
+        logger.error("Empty YAML content")
+        raise ValueError("Empty content")
+    
+    # Check for suspicious patterns
+    suspicious_patterns = [
+        r'!!python/',
+        r'!!python/object',
+        r'!!python/name:',
+        r'!!python/module:',
+        r'!!map',
+        r'!!omap',
+        r'!!pairs',
+        r'!!set',
+        r'!!str',
+        r'!!seq',
+        r'!!null'
+    ]
+    
+    for pattern in suspicious_patterns:
+        if re.search(pattern, yaml_content, re.IGNORECASE):
+            logger.error(f"Suspicious pattern detected: {pattern}")
+            raise ValueError("Potentially unsafe YAML content")
     
     # Try to parse and validate the YAML with safe loader
     try:
         data = yaml.safe_load(yaml_content)
         if isinstance(data, dict):
-            print("✓ YAML parsed successfully")
+            logger.info("YAML parsed successfully")
             
             # Ensure required fields exist with defaults
             if 'schema_version' not in data:
@@ -104,17 +150,18 @@ try:
             
             # Output clean YAML with safe dump
             clean_yaml = yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
-            with open('corrected_review.yaml', 'w') as f:
+            logger.info(f"Writing output to {output_file}")
+            with open(output_file, 'w') as f:
                 f.write(clean_yaml)
             
-            print("✅ Generated corrected YAML format")
+            logger.info("Successfully generated corrected YAML format")
             
         else:
-            print("❌ YAML content is not a valid dictionary")
+            logger.error("YAML content is not a valid dictionary")
             sys.exit(1)
             
     except yaml.YAMLError as e:
-        print(f"❌ YAML parsing failed: {e}")
+        logger.error(f"YAML parsing failed: {e}")
         # Create minimal valid YAML as fallback
         actual_coverage = safe_float(os.environ.get('COVERAGE_PCT', '0'), 0)
         coverage_baseline = safe_float(os.environ.get('COVERAGE_BASELINE', '78.0'), 78.0)
@@ -141,11 +188,17 @@ try:
             'automated_issues': []
         }
         
-        with open('corrected_review.yaml', 'w') as f:
+        with open(output_file, 'w') as f:
             yaml.safe_dump(fallback_data, f, default_flow_style=False, sort_keys=False)
         
-        print("✅ Generated fallback YAML format")
+        logger.warning("Generated fallback YAML format due to parsing error")
 
+except FileNotFoundError as e:
+    logger.error(f"Input file not found: {e}")
+    sys.exit(1)
+except PermissionError as e:
+    logger.error(f"Permission denied: {e}")
+    sys.exit(1)
 except Exception as e:
-    print(f"❌ Unexpected error: {e}")
+    logger.error(f"Unexpected error: {e}")
     sys.exit(1)

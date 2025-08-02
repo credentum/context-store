@@ -7,7 +7,16 @@ import re
 import yaml
 import sys
 import os
+import logging
 from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    stream=sys.stderr
+)
+logger = logging.getLogger(__name__)
 
 # Security: Restrict file operations to current directory only
 os.chdir(os.getcwd())
@@ -15,15 +24,24 @@ os.chdir(os.getcwd())
 def safe_float(value, default=0.0):
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as e:
+        logger.debug(f"Failed to convert to float: {e}")
         return default
 
 def process_review():
     # Read the raw review from stdin
+    logger.info("Reading review from stdin")
     raw_content = sys.stdin.read()
     
+    # Validate input size
+    if len(raw_content) > 1024 * 1024:  # 1MB limit
+        logger.error("Input too large (max 1MB)")
+        sys.exit(1)
+    
     # Store original for debugging
-    with open('raw_review_output.txt', 'w') as f:
+    output_file = os.environ.get('DEBUG_OUTPUT_FILE', 'raw_review_output.txt')
+    logger.debug(f"Saving raw content to {output_file}")
+    with open(output_file, 'w') as f:
         f.write(raw_content)
     
     # Try to extract YAML from various formats
@@ -109,10 +127,16 @@ confidence: low
         with open('review.yaml', 'w') as f:
             yaml.safe_dump(data, f, default_flow_style=False)
         
-        print(f"Successfully processed review: {len(data.get('issues', {}).get('blocking', []))} blocking issues found")
+        logger.info(f"Successfully processed review: {len(data.get('issues', {}).get('blocking', []))} blocking issues found")
         
+    except yaml.YAMLError as e:
+        logger.error(f"YAML parsing error: {e}")
+        sys.exit(1)
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {e}")
+        sys.exit(1)
     except Exception as e:
-        print(f"Error processing review: {e}")
+        logger.error(f"Unexpected error processing review: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':
