@@ -177,155 +177,155 @@ jobs:
 
             # Extract YAML content from mixed format response
             # Create a secure Python script file
-            cat > process_yaml.py << 'EOF'
-            import re
-            import yaml
-            import sys
-            import os
-            from datetime import datetime
+          cat > process_yaml.py << 'EOF'
+          import re
+          import yaml
+          import sys
+          import os
+          from datetime import datetime
+          
+          # Security: Restrict file operations to current directory only
+          os.chdir(os.getcwd())
+          
+          try:
+            # Read the raw response with size limit for security
+            max_size = 1024 * 1024  # 1MB limit
+            with open('raw_review_output.txt', 'r') as f:
+                content = f.read(max_size)
             
-            # Security: Restrict file operations to current directory only
-            os.chdir(os.getcwd())
+            print("🔧 Processing Claude response for format correction...")
             
-            try:
-                # Read the raw response with size limit for security
-                max_size = 1024 * 1024  # 1MB limit
-                with open('raw_review_output.txt', 'r') as f:
-                    content = f.read(max_size)
-                
-                print("🔧 Processing Claude response for format correction...")
-                
-                # Strategy 1: Try to extract YAML block if it exists
-                yaml_match = re.search(r'```yaml\s*\n(.*?)\n```', content, re.DOTALL)
-                if yaml_match:
-                    yaml_content = yaml_match.group(1)
-                    print("✓ Found YAML block in response")
-                else:
-                    # Strategy 2: Extract everything after markdown headers (---\n)
-                    if '---\n' in content:
-                        parts = content.split('---\n', 1)
-                        if len(parts) > 1:
-                            yaml_content = parts[1].strip()
-                            print("✓ Extracted YAML after markdown separator")
-                        else:
-                            yaml_content = content
+            # Strategy 1: Try to extract YAML block if it exists
+            yaml_match = re.search(r'```yaml\s*\n(.*?)\n```', content, re.DOTALL)
+            if yaml_match:
+                yaml_content = yaml_match.group(1)
+                print("✓ Found YAML block in response")
+            else:
+                # Strategy 2: Extract everything after markdown headers (---\n)
+                if '---\n' in content:
+                    parts = content.split('---\n', 1)
+                    if len(parts) > 1:
+                        yaml_content = parts[1].strip()
+                        print("✓ Extracted YAML after markdown separator")
                     else:
                         yaml_content = content
-                
-                # Clean the YAML content
-                yaml_content = yaml_content.strip()
-                
-                # Remove any remaining markdown formatting
-                yaml_content = re.sub(r'^\*\*.*?\*\*.*?\n', '', yaml_content, flags=re.MULTILINE)
-                yaml_content = re.sub(r'^---\s*$', '', yaml_content, flags=re.MULTILINE)
-                
-                # Try to parse and validate the YAML with safe loader
-                try:
-                    data = yaml.safe_load(yaml_content)
-                    if isinstance(data, dict):
-                        print("✓ YAML parsed successfully")
-                        
-                        # Sanitize and validate all fields
-                        def safe_int(value, default):
-                            try:
-                                return int(value)
-                            except:
-                                return default
-                        
-                        def safe_float(value, default):
-                            try:
-                                return float(value)
-                            except:
-                                return default
-                        
-                        # Ensure required fields exist with defaults
-                        if 'schema_version' not in data:
-                            data['schema_version'] = "1.0"
-                        if 'pr_number' not in data:
-                            data['pr_number'] = safe_int(os.environ.get('PR_NUMBER', '0'), 0)
-                        if 'timestamp' not in data:
-                            data['timestamp'] = datetime.utcnow().isoformat() + 'Z'
-                        if 'reviewer' not in data:
-                            data['reviewer'] = "ARC-Reviewer"
-                        if 'verdict' not in data:
-                            # Determine verdict based on coverage and blocking issues
-                            has_blockers = bool(data.get('issues', {}).get('blocking', []))
-                            coverage_baseline = safe_float(os.environ.get('COVERAGE_BASELINE', '78.0'), 78.0)
-                            coverage_ok = data.get('coverage', {}).get('current_pct', 0) >= coverage_baseline
-                            
-                            if has_blockers or not coverage_ok:
-                                data['verdict'] = "REQUEST_CHANGES"
-                            else:
-                                data['verdict'] = "APPROVE"
-                        if 'summary' not in data:
-                            data['summary'] = "Code review completed"
-                        if 'coverage' not in data:
-                            # Use actual coverage if available
-                            actual_coverage = safe_float(os.environ.get('COVERAGE_PCT', '0'), 0)
-                            coverage_baseline = safe_float(os.environ.get('COVERAGE_BASELINE', '78.0'), 78.0)
-                            meets_baseline = actual_coverage >= coverage_baseline
-                            data['coverage'] = {
-                                'current_pct': actual_coverage,
-                                'status': "PASS" if meets_baseline else "FAIL",
-                                'meets_baseline': meets_baseline
-                            }
-                        if 'issues' not in data:
-                            data['issues'] = {
-                                'blocking': [],
-                                'warnings': [],
-                                'nits': []
-                            }
-                        if 'automated_issues' not in data:
-                            data['automated_issues'] = []
-                        
-                        # Output clean YAML with safe dump
-                        clean_yaml = yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
-                        with open('corrected_review.yaml', 'w') as f:
-                            f.write(clean_yaml)
-                        
-                        print("✅ Generated corrected YAML format")
-                        
-                    else:
-                        print("❌ YAML content is not a valid dictionary")
-                        sys.exit(1)
-                        
-                except yaml.YAMLError as e:
-                    print(f"❌ YAML parsing failed: {e}")
-                    # Create minimal valid YAML as fallback
-                    actual_coverage = safe_float(os.environ.get('COVERAGE_PCT', '0'), 0)
-                    coverage_baseline = safe_float(os.environ.get('COVERAGE_BASELINE', '78.0'), 78.0)
-                    meets_baseline = actual_coverage >= coverage_baseline
-                    pr_number = safe_int(os.environ.get('PR_NUMBER', '0'), 0)
+                else:
+                    yaml_content = content
+            
+            # Clean the YAML content
+            yaml_content = yaml_content.strip()
+            
+            # Remove any remaining markdown formatting
+            yaml_content = re.sub(r'^\*\*.*?\*\*.*?\n', '', yaml_content, flags=re.MULTILINE)
+            yaml_content = re.sub(r'^---\s*$', '', yaml_content, flags=re.MULTILINE)
+            
+            # Try to parse and validate the YAML with safe loader
+            try:
+                data = yaml.safe_load(yaml_content)
+                if isinstance(data, dict):
+                    print("✓ YAML parsed successfully")
                     
-                    fallback_data = {
-                        'schema_version': "1.0",
-                        'pr_number': pr_number,
-                        'timestamp': datetime.utcnow().isoformat() + 'Z',
-                        'reviewer': "ARC-Reviewer",
-                        'verdict': "APPROVE" if meets_baseline else "REQUEST_CHANGES",
-                        'summary': "Format correction applied - review completed",
-                        'coverage': {
+                    # Sanitize and validate all fields
+                    def safe_int(value, default):
+                        try:
+                            return int(value)
+                        except:
+                            return default
+                    
+                    def safe_float(value, default):
+                        try:
+                            return float(value)
+                        except:
+                            return default
+                    
+                    # Ensure required fields exist with defaults
+                    if 'schema_version' not in data:
+                        data['schema_version'] = "1.0"
+                    if 'pr_number' not in data:
+                        data['pr_number'] = safe_int(os.environ.get('PR_NUMBER', '0'), 0)
+                    if 'timestamp' not in data:
+                        data['timestamp'] = datetime.utcnow().isoformat() + 'Z'
+                    if 'reviewer' not in data:
+                        data['reviewer'] = "ARC-Reviewer"
+                    if 'verdict' not in data:
+                        # Determine verdict based on coverage and blocking issues
+                        has_blockers = bool(data.get('issues', {}).get('blocking', []))
+                        coverage_baseline = safe_float(os.environ.get('COVERAGE_BASELINE', '78.0'), 78.0)
+                        coverage_ok = data.get('coverage', {}).get('current_pct', 0) >= coverage_baseline
+                        
+                        if has_blockers or not coverage_ok:
+                            data['verdict'] = "REQUEST_CHANGES"
+                        else:
+                            data['verdict'] = "APPROVE"
+                    if 'summary' not in data:
+                        data['summary'] = "Code review completed"
+                    if 'coverage' not in data:
+                        # Use actual coverage if available
+                        actual_coverage = safe_float(os.environ.get('COVERAGE_PCT', '0'), 0)
+                        coverage_baseline = safe_float(os.environ.get('COVERAGE_BASELINE', '78.0'), 78.0)
+                        meets_baseline = actual_coverage >= coverage_baseline
+                        data['coverage'] = {
                             'current_pct': actual_coverage,
                             'status': "PASS" if meets_baseline else "FAIL",
                             'meets_baseline': meets_baseline
-                        },
-                        'issues': {
-                            'blocking': [] if meets_baseline else [{'description': f'Coverage below baseline: {actual_coverage}% < {coverage_baseline}%', 'category': 'coverage'}],
-                            'warnings': [{'description': 'Original review format was invalid', 'category': 'format'}],
+                        }
+                    if 'issues' not in data:
+                        data['issues'] = {
+                            'blocking': [],
+                            'warnings': [],
                             'nits': []
-                        },
-                        'automated_issues': []
-                    }
+                        }
+                    if 'automated_issues' not in data:
+                        data['automated_issues'] = []
                     
+                    # Output clean YAML with safe dump
+                    clean_yaml = yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
                     with open('corrected_review.yaml', 'w') as f:
-                        yaml.safe_dump(fallback_data, f, default_flow_style=False, sort_keys=False)
+                        f.write(clean_yaml)
                     
-                    print("✅ Generated fallback YAML format")
-            
-            except Exception as e:
-                print(f"❌ Unexpected error: {e}")
-                sys.exit(1)
-EOF
+                    print("✅ Generated corrected YAML format")
+                    
+                else:
+                    print("❌ YAML content is not a valid dictionary")
+                    sys.exit(1)
+                    
+            except yaml.YAMLError as e:
+                print(f"❌ YAML parsing failed: {e}")
+                # Create minimal valid YAML as fallback
+                actual_coverage = safe_float(os.environ.get('COVERAGE_PCT', '0'), 0)
+                coverage_baseline = safe_float(os.environ.get('COVERAGE_BASELINE', '78.0'), 78.0)
+                meets_baseline = actual_coverage >= coverage_baseline
+                pr_number = safe_int(os.environ.get('PR_NUMBER', '0'), 0)
+                
+                fallback_data = {
+                    'schema_version': "1.0",
+                    'pr_number': pr_number,
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'reviewer': "ARC-Reviewer",
+                    'verdict': "APPROVE" if meets_baseline else "REQUEST_CHANGES",
+                    'summary': "Format correction applied - review completed",
+                    'coverage': {
+                        'current_pct': actual_coverage,
+                        'status': "PASS" if meets_baseline else "FAIL",
+                        'meets_baseline': meets_baseline
+                    },
+                    'issues': {
+                        'blocking': [] if meets_baseline else [{'description': f'Coverage below baseline: {actual_coverage}% < {coverage_baseline}%', 'category': 'coverage'}],
+                        'warnings': [{'description': 'Original review format was invalid', 'category': 'format'}],
+                        'nits': []
+                    },
+                    'automated_issues': []
+                }
+                
+                with open('corrected_review.yaml', 'w') as f:
+                    yaml.safe_dump(fallback_data, f, default_flow_style=False, sort_keys=False)
+                
+                print("✅ Generated fallback YAML format")
+          
+          except Exception as e:
+            print(f"❌ Unexpected error: {e}")
+            sys.exit(1)
+          EOF
 
             # Set environment variables securely and run the script
             export PR_NUMBER="${{ github.event.pull_request.number }}"
@@ -870,83 +870,83 @@ EOF
 
           if [ -s automation.txt ]; then
             # Extract and process YAML securely
-            cat > process_automation.py << 'EOF'
-            import re
-            import yaml
-            import os
-            import sys
+          cat > process_automation.py << 'EOF'
+          import re
+          import yaml
+          import os
+          import sys
+          
+          # Security: Restrict operations
+          max_file_size = 1024 * 1024  # 1MB limit
+          
+          try:
+            with open('automation.txt', 'r') as f:
+                content = f.read(max_file_size)
             
-            # Security: Restrict operations
-            max_file_size = 1024 * 1024  # 1MB limit
-            
-            try:
-                with open('automation.txt', 'r') as f:
-                    content = f.read(max_file_size)
-                
-                yaml_match = re.search(r'```yaml\s*\n(.*?)\n```', content, re.DOTALL)
-                if yaml_match:
-                    try:
-                        data = yaml.safe_load(yaml_match.group(1))
-                        issues = data.get('automated_issues', [])
-                        
-                        if issues:
-                            print(f"Found {len(issues)} automation issues")
-                            
-                            # Use default labels - no dynamic imports for security
-                            validated_labels = ['from-code-review', 'sprint-current', 'phase:4.1']
-                            
-                            # Build issue content with proper escaping
-                            checklist = []
-                            for issue in issues[:20]:  # Limit to 20 issues for safety
-                                # Sanitize inputs
-                                title = str(issue.get('title', 'Untitled'))[:200]
-                                desc = str(issue.get('description', 'No description'))[:500]
-                                phase = str(issue.get('phase', 'unknown'))[:50]
-                                
-                                # Escape markdown special characters
-                                title = title.replace('*', '\\*').replace('_', '\\_')
-                                desc = desc.replace('*', '\\*').replace('_', '\\_')
-                                
-                                checklist.append(f"- [ ] **{title}**: {desc} (phase: {phase})")
-                            
-                            # Get environment variables safely
-                            pr_num = os.environ.get('PR_NUM', '0')
-                            pr_url = os.environ.get('PR_URL', '#')
-                            pr_author = os.environ.get('PR_AUTHOR', 'unknown')
-                            
-                            # Build issue content safely
-                            issue_body = f"""## Automated Follow-ups from PR #{pr_num}
-            
-            Source: {pr_url}
-            Author: @{pr_author}
-            
-            ## Issues to Triage
-            
-            {chr(10).join(checklist)}
-            
-            ## Instructions
-            
-            For agents/PMs: Review, prioritize, and move high-value items to sprint YAML files.
-            
-            ---
-            Auto-generated by ARC-Reviewer"""
-                            
-                            with open('issue_body.md', 'w') as f:
-                                f.write(issue_body)
-                            
-                            print("✅ Issue body created successfully")
-                            
-                        else:
-                            print("No automation issues found")
-                    except Exception as e:
-                        print(f"Error processing automation data: {e}")
-                else:
-                    print("No automation comment found")
+            yaml_match = re.search(r'```yaml\s*\n(.*?)\n```', content, re.DOTALL)
+            if yaml_match:
+                try:
+                    data = yaml.safe_load(yaml_match.group(1))
+                    issues = data.get('automated_issues', [])
                     
-            except Exception as e:
-                print(f"Error reading automation file: {e}")
-                sys.exit(1)
-EOF
+                    if issues:
+                        print(f"Found {len(issues)} automation issues")
+                        
+                        # Use default labels - no dynamic imports for security
+                        validated_labels = ['from-code-review', 'sprint-current', 'phase:4.1']
+                        
+                        # Build issue content with proper escaping
+                        checklist = []
+                        for issue in issues[:20]:  # Limit to 20 issues for safety
+                            # Sanitize inputs
+                            title = str(issue.get('title', 'Untitled'))[:200]
+                            desc = str(issue.get('description', 'No description'))[:500]
+                            phase = str(issue.get('phase', 'unknown'))[:50]
+                            
+                            # Escape markdown special characters
+                            title = title.replace('*', '\\*').replace('_', '\\_')
+                            desc = desc.replace('*', '\\*').replace('_', '\\_')
+                            
+                            checklist.append(f"- [ ] **{title}**: {desc} (phase: {phase})")
+                        
+                        # Get environment variables safely
+                        pr_num = os.environ.get('PR_NUM', '0')
+                        pr_url = os.environ.get('PR_URL', '#')
+                        pr_author = os.environ.get('PR_AUTHOR', 'unknown')
+                        
+                        # Build issue content safely
+                        issue_body = f"""## Automated Follow-ups from PR #{pr_num}
+          
+          Source: {pr_url}
+          Author: @{pr_author}
+          
+          ## Issues to Triage
+          
+          {chr(10).join(checklist)}
+          
+          ## Instructions
+          
+          For agents/PMs: Review, prioritize, and move high-value items to sprint YAML files.
+          
+          ---
+          Auto-generated by ARC-Reviewer"""
+                        
+                        with open('issue_body.md', 'w') as f:
+                            f.write(issue_body)
+                        
+                        print("✅ Issue body created successfully")
+                        
+                    else:
+                        print("No automation issues found")
+                except Exception as e:
+                    print(f"Error processing automation data: {e}")
+            else:
+                print("No automation comment found")
+                
+          except Exception as e:
+            print(f"Error reading automation file: {e}")
+            sys.exit(1)
+          EOF
 
             # Set environment variables and run the script
             export PR_NUM="${{ github.event.pull_request.number }}"
